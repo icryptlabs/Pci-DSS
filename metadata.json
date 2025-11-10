@@ -1,5 +1,7 @@
 {
   "name": "PCI DSS Compliance Monitoring Dashboard",
   "description": "A React-based web application that simulates and visualizes a multi-agent system for automated PCI DSS compliance monitoring in a retail environment using Gemini for automated reasoning.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

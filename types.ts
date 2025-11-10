@@ -1,4 +1,3 @@
-
 export enum ComplianceStatus {
   COMPLIANT = 'compliant',
   NON_COMPLIANT = 'non_compliant',
@@ -20,4 +19,11 @@ export interface ComplianceReport {
   };
   finalStatus: ComplianceStatus;
   geminiReport: string;
+}
+
+export interface ChatMessage {
+    id: string;
+    role: 'user' | 'model';
+    text: string;
+    sources?: { title: string; uri: string }[];
 }

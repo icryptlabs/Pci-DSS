@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { ComplianceStatus } from '../types';
 
@@ -59,4 +58,33 @@ export const generateComplianceReport = async (
     console.error("Error generating compliance report from Gemini:", error);
     return "Could not generate automated report due to an API error.";
   }
+};
+
+export const askWithGrounding = async (prompt: string, useGrounding: boolean): Promise<{ text: string; sources?: { title: string; uri: string }[] }> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: prompt,
+            config: {
+                tools: useGrounding ? [{ googleSearch: {} }] : [],
+            },
+        });
+
+        const text = response.text;
+        const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        
+        let sources: { title: string; uri: string }[] | undefined;
+        if (groundingChunks) {
+            sources = groundingChunks
+                .map(chunk => chunk.web)
+                .filter(web => web?.uri && web?.title)
+                .map(web => ({ title: web.title!, uri: web.uri! }));
+        }
+
+        return { text, sources };
+
+    } catch (error) {
+        console.error("Error asking Gemini:", error);
+        return { text: "Sorry, I encountered an error. Please try again." };
+    }
 };

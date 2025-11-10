@@ -1,10 +1,13 @@
-
 import React, { useState, useCallback } from 'react';
 import { ComplianceReport, ComplianceStatus } from './types';
 import { generateComplianceReport } from './services/geminiService';
 import Header from './components/Header';
 import ReportTable from './components/LogTable';
-import { CloudSchedulerIcon, CloudRunIcon, PubSubIcon, FirestoreIcon, CloudStorageIcon, AgentIcon, CheckCircleIcon, XCircleIcon, ClockIcon } from './components/icons';
+import Chatbot from './components/Chatbot';
+import { 
+    CloudSchedulerIcon, CloudRunIcon, PubSubIcon, FirestoreIcon, CloudStorageIcon, AgentIcon, 
+    CheckCircleIcon, XCircleIcon, ClockIcon, ChatIcon, AlertTriangleIcon
+} from './components/icons';
 
 const PCI_BASELINE_CONFIG = "pci_baseline_v1.2";
 const TAMPERED_CONFIG = "pci_baseline_v1.2_tampered_config";
@@ -89,6 +92,8 @@ const ComplianceAgentDetail: React.FC<{statuses: any}> = ({ statuses }) => {
     { name: 'LogScannerAgent', description: 'Scans evidence log for PCI violations.', status: statuses.logScannerAgent },
     { name: 'ReportAgent', description: 'Generates final structured report.', status: statuses.reportAgent },
   ];
+  
+  const validationFailed = statuses.validationAgent === ComplianceStatus.NON_COMPLIANT;
 
   return (
     <div className="bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700 h-full">
@@ -99,6 +104,17 @@ const ComplianceAgentDetail: React.FC<{statuses: any}> = ({ statuses }) => {
           <p className="text-sm text-gray-400">Live status of the internal multi-agent system.</p>
         </div>
       </div>
+      
+      {validationFailed && (
+        <div className="bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-md mb-4 flex items-center gap-3">
+          <AlertTriangleIcon className="w-6 h-6 flex-shrink-0" />
+          <div>
+            <h4 className="font-bold">Configuration Drift Detected!</h4>
+            <p className="text-sm">ValidationAgent reported a non-compliant status. The device configuration hash does not match the secure baseline.</p>
+          </div>
+        </div>
+      )}
+      
       <div className="space-y-4">
         {subAgents.map(agent => (
           <div key={agent.name} className="flex items-center justify-between bg-gray-900 p-3 rounded-md">
@@ -123,6 +139,7 @@ const App: React.FC = () => {
   const [reports, setReports] = useState<ComplianceReport[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isTampered, setIsTampered] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   
   const initialArchStatus = {
     scheduler: ComplianceStatus.IDLE,
@@ -275,6 +292,18 @@ const App: React.FC = () => {
 
         <ReportTable reports={reports} />
       </main>
+      
+      <div className="fixed bottom-6 right-6 z-50">
+          <button 
+              onClick={() => setIsChatOpen(!isChatOpen)}
+              className="bg-cyan-500 hover:bg-cyan-600 text-white rounded-full p-4 shadow-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-opacity-75 transition-transform transform hover:scale-110"
+              aria-label="Toggle Chatbot"
+            >
+              <ChatIcon className="w-8 h-8" />
+          </button>
+      </div>
+
+      {isChatOpen && <Chatbot onClose={() => setIsChatOpen(false)} />}
     </div>
   );
 };
