@@ -11,26 +11,52 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const getCompliancePrompt = (status: ComplianceStatus, requirementId: string): string => {
-  if (status === ComplianceStatus.COMPLIANT) {
-    return `You are a PCI DSS compliance assistant. A device's configuration hash matched the expected secure baseline for requirement '${requirementId}'. Briefly explain in one sentence why this indicates a secure state.`;
-  }
-  return `You are a PCI DSS compliance assistant. A device's configuration hash FAILED to match the expected secure baseline for requirement '${requirementId}'. Briefly explain in one sentence the security risk this unauthorized change poses.`;
+const getReportGenerationPrompt = (
+    deviceId: string,
+    hashValidationStatus: ComplianceStatus,
+    logScanSummary: string,
+): string => {
+    const hashResult = hashValidationStatus === ComplianceStatus.COMPLIANT 
+        ? "The device configuration hash matched the secure baseline, indicating no unauthorized changes."
+        : "CRITICAL: The device configuration hash DID NOT MATCH the secure baseline, indicating a possible unauthorized and malicious change.";
+    
+    const logResult = logScanSummary;
+
+    return `
+You are a Senior Security Analyst for a retail company, responsible for PCI DSS compliance reporting.
+An automated attestation event has occurred for a device. Analyze the following data and generate a concise, professional compliance report in markdown format.
+
+**Device ID:** ${deviceId}
+
+**Analysis Data:**
+1.  **Configuration Hash Integrity:** ${hashResult}
+2.  **Log File Scan Summary:** ${logResult}
+
+**Instructions:**
+-   Start with a headline: "Compliance Report: [Device ID] - [Date]"
+-   Provide a "Final Status" of either "COMPLIANT" or "NON-COMPLIANT".
+-   Write a short "Executive Summary" (2-3 sentences) explaining the overall compliance status.
+-   Include a "Detailed Findings" section with bullet points for both the hash integrity and log scan results.
+-   Conclude with a "Recommended Actions" section. If compliant, recommend continued monitoring. If non-compliant, recommend immediate investigation, isolation of the device, and a security audit.
+`;
 };
 
-export const getComplianceReasoning = async (
-  status: ComplianceStatus,
-  requirementId: string
+export const generateComplianceReport = async (
+  reportData: { deviceId: string; hashValidationStatus: ComplianceStatus; logScanSummary: string }
 ): Promise<string> => {
   try {
-    const prompt = getCompliancePrompt(status, requirementId);
+    const prompt = getReportGenerationPrompt(
+        reportData.deviceId,
+        reportData.hashValidationStatus,
+        reportData.logScanSummary
+    );
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: prompt,
     });
     return response.text.trim();
   } catch (error) {
-    console.error("Error fetching compliance reasoning from Gemini:", error);
-    return "Could not retrieve automated analysis due to an API error.";
+    console.error("Error generating compliance report from Gemini:", error);
+    return "Could not generate automated report due to an API error.";
   }
 };

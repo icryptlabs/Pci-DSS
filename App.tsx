@@ -1,11 +1,10 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { ComplianceLog, ComplianceStatus } from './types';
-import { getComplianceReasoning } from './services/geminiService';
+import React, { useState, useCallback } from 'react';
+import { ComplianceReport, ComplianceStatus } from './types';
+import { generateComplianceReport } from './services/geminiService';
 import Header from './components/Header';
-import AgentCard from './components/AgentCard';
-import LogTable from './components/LogTable';
-import { PubSubIcon, FirestoreIcon } from './components/icons';
+import ReportTable from './components/LogTable';
+import { CloudSchedulerIcon, CloudRunIcon, PubSubIcon, FirestoreIcon, CloudStorageIcon, AgentIcon, CheckCircleIcon, XCircleIcon, ClockIcon } from './components/icons';
 
 const PCI_BASELINE_CONFIG = "pci_baseline_v1.2";
 const TAMPERED_CONFIG = "pci_baseline_v1.2_tampered_config";
@@ -18,26 +17,148 @@ const EXPECTED_HASH_PROMISE = (async () => {
 })();
 
 
+// --- Sub-component: ArchitectureDiagram ---
+const archStatusClasses = {
+  [ComplianceStatus.IDLE]: 'border-gray-700 text-gray-400',
+  [ComplianceStatus.PENDING]: 'border-gray-700 text-gray-400',
+  [ComplianceStatus.RUNNING]: 'border-yellow-500 text-yellow-300 animate-pulse',
+  [ComplianceStatus.COMPLIANT]: 'border-green-500 text-green-300',
+  [ComplianceStatus.NON_COMPLIANT]: 'border-red-500 text-red-300',
+}
+
+const StepCard: React.FC<{ name: string; icon: React.ReactNode; status: ComplianceStatus; description: string }> = ({ name, icon, status, description }) => (
+  <div className={`bg-gray-900 p-3 rounded-lg border-2 transition-all duration-500 flex-1 min-w-[180px] ${archStatusClasses[status]}`}>
+    <div className="flex items-center gap-3">
+      <div className={`w-8 h-8 flex-shrink-0 ${status === ComplianceStatus.RUNNING ? 'text-yellow-400' : 'text-cyan-400'}`}>{icon}</div>
+      <div>
+        <h4 className="font-bold text-sm">{name}</h4>
+        <p className="text-xs text-gray-500">{description}</p>
+      </div>
+    </div>
+  </div>
+);
+
+const Arrow: React.FC = () => (
+    <div className="text-gray-600 text-3xl font-light hidden lg:block px-2">→</div>
+);
+
+const ArchitectureDiagram: React.FC<{statuses: any}> = ({ statuses }) => {
+  const steps = [
+    { name: 'Cloud Scheduler', icon: <CloudSchedulerIcon />, status: statuses.scheduler, description: "Triggers inspection job." },
+    { name: 'Inspector Agent (Job)', icon: <CloudRunIcon />, status: statuses.inspector, description: "Generates hash & evidence." },
+    { name: 'Cloud Storage', icon: <CloudStorageIcon />, status: statuses.storage, description: "Stores evidence file." },
+    { name: 'Pub/Sub', icon: <PubSubIcon />, status: statuses.pubsub, description: "Publishes event." },
+    { name: 'Compliance Agent', icon: <CloudRunIcon />, status: statuses.complianceAgent, description: "Runs AI analysis." },
+    { name: 'Firestore', icon: <FirestoreIcon />, status: statuses.firestore, description: "Stores compliance report." },
+  ];
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 shadow-lg">
+      <h2 className="text-xl font-bold mb-4">Event-Driven Architecture Flow</h2>
+      <div className="flex flex-wrap items-stretch justify-center gap-4">
+        {steps.map((step, index) => (
+          <React.Fragment key={step.name}>
+            <StepCard {...step} />
+            {index < steps.length - 1 && <Arrow />}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+
+// --- Sub-component: ComplianceAgentDetail ---
+const AgentStatusIcon: React.FC<{ status: ComplianceStatus }> = ({ status }) => {
+  switch (status) {
+    case ComplianceStatus.RUNNING:
+      return <ClockIcon className="w-6 h-6 text-yellow-400 animate-spin" />;
+    case ComplianceStatus.COMPLIANT:
+      return <CheckCircleIcon className="w-6 h-6 text-green-400" />;
+    case ComplianceStatus.NON_COMPLIANT:
+      return <XCircleIcon className="w-6 h-6 text-red-400" />;
+    default:
+      return <ClockIcon className="w-6 h-6 text-gray-600" />;
+  }
+}
+
+const ComplianceAgentDetail: React.FC<{statuses: any}> = ({ statuses }) => {
+  const subAgents = [
+    { name: 'ComplyAgent (Root)', description: 'Orchestrates the compliance workflow.', status: statuses.complyAgent },
+    { name: 'ValidationAgent', description: 'Validates config hash against baseline.', status: statuses.validationAgent },
+    { name: 'LogScannerAgent', description: 'Scans evidence log for PCI violations.', status: statuses.logScannerAgent },
+    { name: 'ReportAgent', description: 'Generates final structured report.', status: statuses.reportAgent },
+  ];
+
+  return (
+    <div className="bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700 h-full">
+      <div className="flex items-center mb-4">
+        <div className="text-cyan-400 mr-4"><AgentIcon className="w-10 h-10" /></div>
+        <div>
+          <h3 className="text-xl font-bold text-white">Compliance Agent Workflow</h3>
+          <p className="text-sm text-gray-400">Live status of the internal multi-agent system.</p>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {subAgents.map(agent => (
+          <div key={agent.name} className="flex items-center justify-between bg-gray-900 p-3 rounded-md">
+            <div>
+              <p className="font-semibold text-gray-200">{agent.name}</p>
+              <p className="text-xs text-gray-500">{agent.description}</p>
+            </div>
+            <div className="flex items-center gap-2">
+                <span className="text-sm font-mono capitalize">{agent.status}</span>
+                <AgentStatusIcon status={agent.status} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+
+// --- Main App Component ---
 const App: React.FC = () => {
-  const [logs, setLogs] = useState<ComplianceLog[]>([]);
+  const [reports, setReports] = useState<ComplianceReport[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isTampered, setIsTampered] = useState(false);
-  const [currentHash, setCurrentHash] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<string>('Idle. Ready to inspect.');
-  // Fix: Use state to manage and display the resolved promise value for the expected hash.
-  const [expectedHash, setExpectedHash] = useState<string | null>(null);
+  
+  const initialArchStatus = {
+    scheduler: ComplianceStatus.IDLE,
+    inspector: ComplianceStatus.IDLE,
+    storage: ComplianceStatus.IDLE,
+    pubsub: ComplianceStatus.IDLE,
+    complianceAgent: ComplianceStatus.IDLE,
+    firestore: ComplianceStatus.IDLE,
+  };
 
-  useEffect(() => {
-    EXPECTED_HASH_PROMISE.then(hash => {
-      setExpectedHash(hash);
-    });
-  }, []);
+  const initialAgentStatus = {
+    complyAgent: ComplianceStatus.IDLE,
+    validationAgent: ComplianceStatus.IDLE,
+    logScannerAgent: ComplianceStatus.IDLE,
+    reportAgent: ComplianceStatus.IDLE,
+  };
 
-  const runInspection = useCallback(async () => {
+  const [archStatuses, setArchStatuses] = useState(initialArchStatus);
+  const [agentStatuses, setAgentStatuses] = useState(initialAgentStatus);
+
+  const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+  const triggerInspection = useCallback(async () => {
     setIsLoading(true);
-    setCurrentHash(null);
-    setAgentStatus('Inspector Agent: Generating configuration hash...');
+    setArchStatuses(initialArchStatus);
+    setAgentStatuses(initialAgentStatus);
+
+    const deviceId = `prod-pos-${Math.floor(1000 + Math.random() * 9000)}`;
+    const evidenceLogUrl = `gs://pci-evidence-logs/${deviceId}-${Date.now()}.log`;
     
+    // 1. Cloud Scheduler
+    setArchStatuses(prev => ({ ...prev, scheduler: ComplianceStatus.RUNNING }));
+    await delay(500);
+    setArchStatuses(prev => ({ ...prev, scheduler: ComplianceStatus.COMPLIANT, inspector: ComplianceStatus.RUNNING }));
+
+    // 2. Inspector Agent
     const configToHash = isTampered ? TAMPERED_CONFIG : PCI_BASELINE_CONFIG;
     const encoder = new TextEncoder();
     const data = encoder.encode(configToHash);
@@ -45,34 +166,72 @@ const App: React.FC = () => {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const generatedHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     
-    setCurrentHash(generatedHash);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await delay(1000);
+    setArchStatuses(prev => ({ ...prev, inspector: ComplianceStatus.COMPLIANT, storage: ComplianceStatus.RUNNING }));
+
+    // 3. Cloud Storage
+    await delay(500);
+    setArchStatuses(prev => ({ ...prev, storage: ComplianceStatus.COMPLIANT, pubsub: ComplianceStatus.RUNNING }));
     
-    setAgentStatus('Inspector Agent: Publishing hash to Pub/Sub...');
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // 4. Pub/Sub
+    await delay(500);
+    setArchStatuses(prev => ({ ...prev, pubsub: ComplianceStatus.COMPLIANT, complianceAgent: ComplianceStatus.RUNNING }));
     
-    setAgentStatus('Compliance Agent: Received hash. Validating...');
+    // 5. Compliance Agent Workflow
+    setAgentStatuses(prev => ({ ...prev, complyAgent: ComplianceStatus.RUNNING, validationAgent: ComplianceStatus.RUNNING }));
+    await delay(1000);
+
+    // 5a. ValidationAgent
     const expectedHashValue = await EXPECTED_HASH_PROMISE;
-    const status = generatedHash === expectedHashValue ? ComplianceStatus.COMPLIANT : ComplianceStatus.NON_COMPLIANT;
-    const requirementId = "Req-2.2";
-
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setAgentStatus(`Compliance Agent: Hash is ${status}. Fetching analysis from Gemini...`);
+    const hashValidationStatus = generatedHash === expectedHashValue ? ComplianceStatus.COMPLIANT : ComplianceStatus.NON_COMPLIANT;
+    setAgentStatuses(prev => ({ ...prev, validationAgent: hashValidationStatus, logScannerAgent: ComplianceStatus.RUNNING }));
+    await delay(1000);
     
-    const reasoning = await getComplianceReasoning(status, requirementId);
-
-    const newLog: ComplianceLog = {
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      hash: generatedHash,
-      status,
-      requirementId,
-      reasoning
+    // 5b. LogScannerAgent
+    const logScanResult = {
+        status: isTampered ? ComplianceStatus.NON_COMPLIANT : ComplianceStatus.COMPLIANT,
+        summary: isTampered 
+            ? "CRITICAL: Found 2 unauthorized root login attempts and 1 unexpected outbound connection to a foreign IP."
+            : "No anomalies or PCI violations detected in the device log."
     };
+    setAgentStatuses(prev => ({ ...prev, logScannerAgent: logScanResult.status, reportAgent: ComplianceStatus.RUNNING }));
+    await delay(1500);
 
-    setLogs(prevLogs => [newLog, ...prevLogs]);
-    setAgentStatus('Compliance Agent: Stored result in Firestore. System is idle.');
+    // 5c. ReportAgent
+    const geminiReport = await generateComplianceReport({
+        deviceId,
+        hashValidationStatus,
+        logScanSummary: logScanResult.summary,
+    });
+    
+    const finalStatus = (hashValidationStatus === ComplianceStatus.COMPLIANT && logScanResult.status === ComplianceStatus.COMPLIANT)
+        ? ComplianceStatus.COMPLIANT
+        : ComplianceStatus.NON_COMPLIANT;
+        
+    setAgentStatuses(prev => ({ ...prev, reportAgent: finalStatus, complyAgent: finalStatus }));
+
+    const newReport: ComplianceReport = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        deviceId,
+        configHash: generatedHash,
+        evidenceLogUrl,
+        hashValidationStatus,
+        logScanResult,
+        finalStatus,
+        geminiReport,
+    };
+    
+    await delay(500);
+    setArchStatuses(prev => ({ ...prev, complianceAgent: finalStatus, firestore: ComplianceStatus.RUNNING }));
+    
+    // 6. Firestore
+    setReports(prevReports => [newReport, ...prevReports]);
+    await delay(500);
+    setArchStatuses(prev => ({ ...prev, firestore: ComplianceStatus.COMPLIANT }));
+
     setIsLoading(false);
+
   }, [isTampered]);
 
   return (
@@ -83,7 +242,7 @@ const App: React.FC = () => {
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex-grow">
               <h2 className="text-xl font-bold">Simulation Control</h2>
-              <p className="text-gray-400">Trigger a simulated compliance check. Toggle 'Simulate Tampering' to test failure conditions.</p>
+              <p className="text-gray-400">Trigger the event-driven workflow. Toggle 'Simulate Tampering' to test failure conditions.</p>
             </div>
             <div className="flex items-center gap-4">
                <label className="relative inline-flex items-center cursor-pointer">
@@ -92,7 +251,7 @@ const App: React.FC = () => {
                 <span className="ml-3 text-sm font-medium text-gray-300">Simulate Tampering</span>
               </label>
               <button
-                onClick={runInspection}
+                onClick={triggerInspection}
                 disabled={isLoading}
                 className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-md transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center"
               >
@@ -104,29 +263,17 @@ const App: React.FC = () => {
                   </svg>
                   Processing...
                   </>
-                ) : 'Run Hourly Inspection'}
+                ) : 'Trigger Inspector Agent'}
               </button>
             </div>
           </div>
         </div>
+        
+        <ArchitectureDiagram statuses={archStatuses} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <AgentCard title="Inspector Agent" description="Simulates a device generating and publishing configuration hashes." icon={<PubSubIcon className="w-8 h-8"/>}>
-            <p><span className="font-semibold text-gray-300">Configuration Source:</span> <span className={`font-mono p-1 rounded ${isTampered ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'}`}>{isTampered ? TAMPERED_CONFIG : PCI_BASELINE_CONFIG}</span></p>
-            <p><span className="font-semibold text-gray-300">Generated SHA-256 Hash:</span></p>
-            <div className="font-mono text-cyan-400 bg-gray-900 p-2 rounded break-all h-20 overflow-y-auto">{currentHash || '...'}</div>
-             <p><span className="font-semibold text-gray-300">Status:</span> <span className="text-yellow-300">{agentStatus}</span></p>
-          </AgentCard>
+        <ComplianceAgentDetail statuses={agentStatuses} />
 
-          <AgentCard title="Compliance Agent" description="Listens for hashes, validates them, and logs the result." icon={<FirestoreIcon className="w-8 h-8"/>}>
-             <p><span className="font-semibold text-gray-300">Expected Baseline Hash:</span></p>
-             {/* Fix: Display the expected hash from state and remove the incorrect script tag. */}
-             <div className="font-mono text-green-400 bg-gray-900 p-2 rounded break-all h-20 overflow-y-auto">{expectedHash || 'loading...'}</div>
-             <p><span className="font-semibold text-gray-300">Last Action:</span> <span className="text-gray-400">{logs.length > 0 ? `Logged ${logs[0].status} status at ${new Date(logs[0].timestamp).toLocaleTimeString()}` : 'Awaiting inspection.'}</span></p>
-          </AgentCard>
-        </div>
-
-        <LogTable logs={logs} />
+        <ReportTable reports={reports} />
       </main>
     </div>
   );
